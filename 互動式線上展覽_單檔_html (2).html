@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>互動式線上展覽（23 展台 / 多平台）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+:root{--primary:#a8d5ba;--bg:#071428;--panel:rgba(255,255,255,0.04);--text:#e6eef8;--muted:#9fb3c8}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family: 'Noto Sans TC', system-ui, sans-serif;background:linear-gradient(180deg,var(--bg),#00111a);color:var(--text)}
+.app{display:flex;flex-direction:row;height:100vh;gap:12px;padding:12px}
+.stage{flex:1;position:relative;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.6)}
+canvas{width:100%;height:100%;display:block;background:linear-gradient(180deg,#03121b,#00121a)}
+.hud{position:absolute;left:12px;top:12px;padding:8px;border-radius:8px;background:var(--panel);font-size:14px;z-index:10}
+.panel{width:340px;max-width:38%;background:rgba(255,255,255,0.03);border-radius:12px;padding:14px;overflow:auto}
+h2{margin:0 0 8px 0}
+.muted{color:var(--muted);font-size:13px}
+.small{font-size:13px;padding:6px 10px;border-radius:8px;background:var(--panel);color:var(--text);border:none;cursor:pointer;transition:background 0.2s}
+.small:hover{background:rgba(255,255,255,0.08)}
+.small.btn{background:var(--primary);color:#000;font-weight:700;}
+.small.btn:hover{background:#b8e5ca;}
+.modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);z-index:60;visibility:hidden;opacity:0;transition:opacity 0.3s}
+.modal.open{visibility:visible;opacity:1}
+.card{background:#071428;padding:16px;border-radius:12px;max-width:90%;width:94%;color:var(--text);display:flex;flex-wrap:wrap;gap:12px;position:relative}
+/* 加大展台卡片寬度 */
+.modal#boothModal .card{
+    width: 900px; 
+    max-width: 90%; 
+}
+.card img{max-width:100%;border-radius:8px;flex-shrink:0;width:300px;height:auto;cursor:grab}
+.modal#boothModal .card img{
+    width: 400px; 
+    cursor: zoom-in; 
+}
+.card .close-btn{position:absolute;top:8px;right:8px;background:var(--primary);border:none;color:#000;font-weight:700;font-size:16px;border-radius:50%;width:32px;height:32px;cursor:pointer;line-height:32px;padding:0;text-align:center;transition:opacity 0.2s}
+.card .close-btn:hover{opacity:0.8}
+.joystick-wrap{position:fixed;left:12px;bottom:12px;width:140px;height:140px;border-radius:50%;display:none;z-index:50;background:rgba(0,0,0,0.2)}
+.stick{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:70px;height:70px;border-radius:50%;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;transition:transform 0.1s}
+.interact-btn{position:fixed;right:12px;bottom:24px;padding:12px 16px;border-radius:10px;background:var(--primary);color:#000;z-index:50;display:none;border:none;font-weight:700;cursor:pointer}
+.char-grid{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.char-item{width:72px;height:72px;border-radius:8px;overflow:hidden;border:2px solid transparent;cursor:pointer;position:relative;display:flex;align-items:center;justify-content:center;font-size:36px} /* 調整為 Emoji 顯示 */
+.char-item img{width:100%;height:100%;object-fit:cover;display:block}
+.char-item.selected{border-color:var(--primary)}
+.char-item::after{content:attr(data-name);position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,0.6);color:#fff;font-size:10px;text-align:center;padding:1px 0}
+@media (max-width:900px){
+    .app{padding:8px}
+    .panel{display:none}
+    .joystick-wrap{display:block}
+    .interact-btn{display:block}
+    .hud{left:8px;top:8px}
+    /* 手機上展台卡片圖片佔滿寬度 */
+    .modal#boothModal .card img {
+        width: 100%; 
+        cursor: zoom-in;
+    }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage" id="stage">
+    <div class="hud" id="hud">載入中… 請等待圖片載入</div>
+    <canvas id="game"></canvas>
+  </div>
+  <div class="panel" id="panel">
+    <h2>展場設定（僅後台）</h2>
+    <div class="muted">本範例為預設 23 個展台，後台可調整座標、標題與圖片。使用者介面不提供新增展台功能。</div>
+    <hr style="margin:12px 0">
+    <div><strong>目前展台數：</strong><span id="boothCount">23</span></div>
+    <div style="margin-top:8px" class="muted">預設展台座標已固定於地圖上。可在後台 JSON 修改 `booths` 陣列以調整。</div>
+    <hr style="margin:12px 0">
+    <h3>角色選擇（玩家）</h3>
+    <div class="muted">玩家可在進入前從預設角色中選一位。</div>
+    <div style="margin-top:8px;text-align:center" id="panelCharPreview"></div>
+    <div style="margin-top:12px;text-align:center">
+      <button id="openCharBtn" class="small">選擇/更換角色</button>
+    </div>
+    <hr style="margin:12px 0">
+    <h3>操作說明</h3>
+    <ul class="muted">
+      <li>電腦：方向鍵 / WASD 移動，靠近展台按 **E** 互動，滑鼠可拖曳視角，滾輪縮放。</li>
+      <li>手機：左下虛擬搖桿移動，右下互動按鈕開啟展台（或點擊展台）。</li>
+    </ul>
+  </div>
+</div>
+
+<div class="joystick-wrap" id="joyWrap"><div class="stick" id="stick"></div></div>
+<button class="interact-btn" id="touchInteract">互動</button>
+
+<div class="modal" id="charModal">
+  <div class="card">
+    <h3 style="width:100%;margin-top:0">選擇角色</h3>
+    <div class="muted" style="width:100%">從預設角色中選擇一個外觀，選擇後開始遊戲。</div>
+    <div class="char-grid" id="charGrid"></div>
+    <div style="margin-top:12px;text-align:right;width:100%"><button id="charConfirm" class="small btn" disabled>確認並開始</button></div>
+    <button class="close-btn" onclick="closeModal(charModal)">&times;</button>   </div>
+</div>
+
+<div class="modal" id="boothModal">
+  <div class="card" id="boothCard" style="position:relative">
+    <button class="close-btn" id="boothClose">&times;</button>
+        <img id="boothImg" src="" alt="" data-original-src=""> 
+    <div class="desc">
+      <h3 id="boothTitle"></h3>
+      <p id="boothDesc" class="muted"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+const IMAGE_FORMAT = '.jpg'; 
+
+const NUM_BOOTHS=23;
+
+// 【修正點 2】：角色改為更可愛的 Emoji
+const CHAR_PRESETS=[
+    {id:'char1',name:'工程師',emoji:'🤖',w:36,h:40},
+    {id:'char2',name:'小丑',emoji:'🤡',w:36,h:40},
+    {id:'char3',name:'外星人',emoji:'👽',w:36,h:40},
+    {id:'char4',name:'幽靈',emoji:'👻',w:36,h:40}
+];
+
+// 展台 Y 軸調整量。上次是 80，這次我將其增加到 120，確保標題有更多空間在上方。
+const Y_OFFSET = 120; 
+
+// [修改開始] 23 個展台資料 (Y 座標已向下調整 Y_OFFSET)
+const booths = [
+    // --- 第一排 (原 Y=100 -> 現 Y=220) ---
+    {
+        id: 1, x: 100, y: 100 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 01：智慧城市應用與未來趨勢分析", // 這是個很長的名字
+        desc: "本展區介紹了最新的交通監控系統與AI驅動的公共安全解決方案。點擊圖片可放大觀看詳細設計圖。",
+        img: `images/1${IMAGE_FORMAT}`
+    },
+    {
+        id: 2, x: 360, y: 100 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 02：元宇宙教育體驗", 
+        desc: "戴上VR頭戴裝置，體驗沉浸式的歷史課程。我們提供虛擬實驗室與遠端教學解決方案。",
+        img: `images/2${IMAGE_FORMAT}`
+    },
+    {
+        id: 3, x: 620, y: 100 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 03：區塊鏈金融創新與DeFi應用", 
+        desc: "深入了解去中心化金融（DeFi）的運作原理，以及如何利用智能合約保障資產安全。",
+        img: `images/3${IMAGE_FORMAT}`
+    },
+    {
+        id: 4, x: 880, y: 100 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 04：AI繪圖與設計技術展示", 
+        desc: "展示多種生成式AI藝術作品，並提供互動工具讓您親自體驗AI創作的樂趣。",
+        img: `images/4${IMAGE_FORMAT}`
+    },
+    {
+        id: 5, x: 1140, y: 100 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 05：新能源儲存技術", 
+        desc: "探索高效能鋰電池與固態電池技術，以及家庭和工業級儲能系統的最新進展。",
+        img: `images/5${IMAGE_FORMAT}`
+    },
+    {
+        id: 6, x: 1400, y: 100 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 06：無人機農業應用", 
+        desc: "展示如何利用高解析度空拍與數據分析，實現精準灌溉、病蟲害監測和作物健康管理。",
+        img: `images/6${IMAGE_FORMAT}`
+    },
+
+    // --- 第二排 (原 Y=360 -> 現 Y=480) ---
+    {
+        id: 7, x: 100, y: 360 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 07：5G+遠距醫療新方案", 
+        desc: "介紹高速5G網路如何實現即時會診、遠端手術輔助和穿戴式健康監測裝置。",
+        img: `images/7${IMAGE_FORMAT}`
+    },
+    {
+        id: 8, x: 360, y: 360 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 08：生物科技與基因編輯", 
+        desc: "深入淺出地解說 CRISPR 技術的倫理與應用，以及未來在醫學領域的潛力。",
+        img: `images/8${IMAGE_FORMAT}`
+    },
+    {
+        id: 9, x: 620, y: 360 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 09：工業4.0與自動化流程", 
+        desc: "參觀自動化生產線模型，了解感測器、機器人與數據分析在智慧工廠中的協同運作。",
+        img: `images/9${IMAGE_FORMAT}`
+    },
+    {
+        id: 10, x: 880, y: 360 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 10：網路安全防護與威脅預警", 
+        desc: "講解如何防禦最新的勒索軟體與網路釣魚攻擊，提升個人及企業的資訊安全意識。",
+        img: `images/10${IMAGE_FORMAT}`
+    },
+    {
+        id: 11, x: 1140, y: 360 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 11：氣候變遷數據分析", 
+        desc: "展示利用大數據模型預測氣候趨勢，並評估極端天氣對全球環境的影響。",
+        img: `images/11${IMAGE_FORMAT}`
+    },
+    {
+        id: 12, x: 1400, y: 360 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 12：互動遊戲設計與引擎開發", 
+        desc: "本區展示了獨立遊戲開發團隊的最新作品，提供試玩區讓參觀者體驗遊戲魅力。",
+        img: `images/12${IMAGE_FORMAT}`
+    },
+
+    // --- 第三排 (原 Y=620 -> 現 Y=740) ---
+    {
+        id: 13, x: 100, y: 620 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 13：太空探索與衛星技術", 
+        desc: "介紹低軌道衛星（LEO）的通訊技術，以及下一代火箭推進系統的研發進度。",
+        img: `images/13${IMAGE_FORMAT}`
+    },
+    {
+        id: 14, x: 360, y: 620 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 14：永續建築與綠色建材", 
+        desc: "展示如何利用可回收材料與智慧能源管理，打造低碳排放的環保建築。",
+        img: `images/14${IMAGE_FORMAT}`
+    },
+    {
+        id: 15, x: 620, y: 620 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 15：擴增實境(AR)購物體驗", 
+        desc: "體驗AR虛擬試穿與產品預覽，革新線下與線上的零售體驗。",
+        img: `images/15${IMAGE_FORMAT}`
+    },
+    {
+        id: 16, x: 880, y: 620 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 16：量子計算基礎介紹", 
+        desc: "講解量子位元、疊加態與量子糾纏等基本概念，探索量子電腦的無限可能。",
+        img: `images/16${IMAGE_FORMAT}`
+    },
+    {
+        id: 17, x: 1140, y: 620 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 17：人機協作機器人應用", 
+        desc: "展示輕量級協作機器人（Cobots）如何在工廠中安全地與人類員工並肩工作。",
+        img: `images/17${IMAGE_FORMAT}`
+    },
+    {
+        id: 18, x: 1400, y: 620 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 18：沉浸式音訊技術", 
+        desc: "體驗 3D 空間音訊技術如何為電影、遊戲和音樂帶來更真實的聽覺感受。",
+        img: `images/18${IMAGE_FORMAT}`
+    },
+
+    // --- 第四排 (原 Y=880 -> 現 Y=1000) ---
+    {
+        id: 19, x: 100, y: 880 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 19：數據可視化應用案例", 
+        desc: "透過動態圖表和視覺化介面，將複雜的數據集轉化為易於理解的故事。",
+        img: `images/19${IMAGE_FORMAT}`
+    },
+    {
+        id: 20, x: 360, y: 880 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 20：開放原始碼專案", 
+        desc: "集合了多個優秀的社群驅動型開源軟體和硬體專案，鼓勵自由交流與貢獻。",
+        img: `images/20${IMAGE_FORMAT}`
+    },
+    {
+        id: 21, x: 620, y: 880 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 21：智慧農業與水資源管理", 
+        desc: "利用 IoT 感測器監測土壤濕度和氣象數據，優化灌溉，節約水資源。",
+        img: `images/21${IMAGE_FORMAT}`
+    },
+    {
+        id: 22, x: 880, y: 880 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 22：軟體工程最佳實踐指南", 
+        desc: "介紹 DevOps、敏捷開發（Agile）與測試驅動開發（TDD）等現代開發流程。",
+        img: `images/22${IMAGE_FORMAT}`
+    },
+    {
+        id: 23, x: 1140, y: 880 + Y_OFFSET, w: 200, h: 120,
+        title: "展台 23：未來交通工具與eVTOL", 
+        desc: "展示電動垂直起降飛行器（eVTOL）和自動駕駛技術的最新原型與測試成果。",
+        img: `images/23${IMAGE_FORMAT}`
+    }
+];
+// [修改結束]
+
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+const stage=document.getElementById('stage');
+const hud=document.getElementById('hud');
+const charModal=document.getElementById('charModal');
+const boothModal=document.getElementById('boothModal');
+const boothImg = document.getElementById('boothImg'); 
+
+// 世界高度增加以容納展台下移
+let worldW=1800,worldH=1600 + Y_OFFSET; 
+const view={x:0,y:0,scale:1};
+function resize(){canvas.width=stage.clientWidth*devicePixelRatio;canvas.height=stage.clientHeight*devicePixelRatio;}
+window.addEventListener('resize',resize);resize();
+
+// 圖片資源管理
+const images = {};
+let imagesLoaded = 0;
+let totalImages = NUM_BOOTHS + 1; 
+
+function loadImage(id, path) {
+    return new Promise(resolve => {
+        // 排除 Emoji 角色，只載入展台圖片和佔位圖
+        if (CHAR_PRESETS.some(c => c.id === id)) {
+            images[id] = { isEmoji: true, emoji: CHAR_PRESETS.find(c => c.id === id).emoji, w: CHAR_PRESETS.find(c => c.id === id).w, h: CHAR_PRESETS.find(c => c.id === id).h };
+            imagesLoaded++;
+            resolve(images[id]);
+            return;
+        }
+
+        const img = new Image();
+        if (!path.startsWith('data:')) {
+            img.crossOrigin = 'anonymous'; 
+        }
+
+        img.onload = () => {
+            images[id] = img;
+            imagesLoaded++;
+            hud.textContent = `載入中… 圖片 ${imagesLoaded} / ${totalImages}`;
+            resolve(img);
+        };
+        img.onerror = () => {
+            // 載入失敗時使用佔位符
+            console.warn(`無法載入圖片: ${path}，請確認圖片是否存在。`);
+            const fallback = new Image();
+            fallback.src = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='${id.startsWith('booth') ? 200 : 48}' height='${id.startsWith('booth') ? 120 : 64}'><rect width='100%' height='100%' fill='%23666'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='14' fill='%23ccc'>No Image</text></svg>`;
+            fallback.onload = () => {
+                images[id] = fallback;
+                imagesLoaded++;
+                hud.textContent = `載入中… 圖片 ${imagesLoaded} / ${totalImages}`;
+                resolve(fallback);
+            }
+            fallback.onerror = () => {
+                images[id] = false; 
+                imagesLoaded++;
+                hud.textContent = `載入中… 圖片 ${imagesLoaded} / ${totalImages}`;
+                resolve(false);
+            }
+        };
+        img.src = path;
+    });
+}
+
+// player
+const initialChar = CHAR_PRESETS[0];
+const player={x:300,y:300 + Y_OFFSET,w:initialChar.w,h:initialChar.h,spd:220,spriteId:initialChar.id,name:initialChar.name}; // 初始位置也向下移
+let gameActive = false;
+let selectedCharId = initialChar.id;
+let lastTime = 0;
+
+// ---------- 角色與模態視窗邏輯 ----------
+const panelCharPreview = document.getElementById('panelCharPreview');
+const charGrid = document.getElementById('charGrid');
+const charConfirm = document.getElementById('charConfirm');
+const openCharBtn = document.getElementById('openCharBtn');
+const boothClose = document.getElementById('boothClose');
+
+// 渲染角色選擇網格
+CHAR_PRESETS.forEach(char => {
+    const item = document.createElement('div');
+    item.className = 'char-item';
+    item.dataset.id = char.id;
+    item.dataset.name = char.name;
+    // 顯示 Emoji 角色
+    item.innerHTML = `<div>${char.emoji}</div>`; 
+    if (char.id === selectedCharId) {
+        item.classList.add('selected');
+        charConfirm.disabled = false;
+    }
+    item.addEventListener('click', () => {
+        document.querySelectorAll('.char-item').forEach(i => i.classList.remove('selected'));
+        item.classList.add('selected');
+        selectedCharId = char.id;
+        charConfirm.disabled = false;
+    });
+    charGrid.appendChild(item);
+});
+
+function openModal(modal) {
+    modal.classList.add('open');
+    gameActive = false; // 暫停遊戲循環
+}
+function closeModal(modal) {
+    modal.classList.remove('open');
+    if(player.spriteId) gameActive = true; // 角色確定後才啟用遊戲
+}
+
+function updateCharPreview(charId) {
+    const char = CHAR_PRESETS.find(c => c.id === charId);
+    if (!char) return;
+    // 預覽顯示 Emoji
+    panelCharPreview.innerHTML = `
+        <div style="width:48px;height:48px;border-radius:4px;border:2px solid var(--primary);font-size:36px;display:flex;align-items:center;justify-content:center;margin:0 auto">${char.emoji}</div>
+        <div style="font-size:14px;margin-top:4px">${char.name}</div>
+    `;
+}
+
+openCharBtn.addEventListener('click', () => openModal(charModal));
+boothClose.addEventListener('click', () => closeModal(boothModal));
+
+charConfirm.addEventListener('click', () => {
+    const selectedChar = CHAR_PRESETS.find(c => c.id === selectedCharId);
+    player.spriteId = selectedChar.id;
+    player.name = selectedChar.name;
+    // 更新玩家大小
+    player.w = selectedChar.w;
+    player.h = selectedChar.h;
+    updateCharPreview(selectedCharId);
+    closeModal(charModal);
+    hud.textContent = `歡迎，${player.name}！靠近展台按 [E] 互動`;
+});
+
+// 啟動時先打開角色選擇模態視窗
+openModal(charModal);
+
+// 圖片點擊放大功能
+boothImg.addEventListener('click', () => {
+    const originalSrc = boothImg.dataset.originalSrc;
+    if (originalSrc) {
+        window.open(originalSrc, '_blank');
+    }
+});
+
+
+// [新增開始] Canvas 文字換行函數
+function wrapText(context, text, maxWidth) {
+    const words = text.split('');
+    let line = '';
+    const lines = [];
+
+    for (let i = 0; i < words.length; i++) {
+        const testLine = line + words[i];
+        const metrics = context.measureText(testLine);
+        const testWidth = metrics.width;
+
+        if (testWidth > maxWidth && i > 0) {
+            lines.push(line);
+            line = words[i]; 
+        } else {
+            line = testLine;
+        }
+    }
+    lines.push(line);
+    return lines;
+}
+// [新增結束]
+
+
+// ---------- 核心遊戲循環邏輯 ----------
+function update(dt) {
+    if (!gameActive) return;
+
+    // 移動邏輯 (略)
+    let dx = 0, dy = 0;
+    if (keys.w || keys.arrowup) dy -= 1;
+    if (keys.s || keys.arrowdown) dy += 1;
+    if (keys.a || keys.arrowleft) dx -= 1;
+    if (keys.d || keys.arrowright) dx += 1;
+    if (Math.hypot(joyVec.x, joyVec.y) > 0.1) {
+        dx = joyVec.x;
+        dy = joyVec.y;
+    }
+
+    const len = Math.hypot(dx, dy);
+    if (len > 0.1) {
+        const factor = player.spd * dt / len;
+        let newX = player.x + dx * factor;
+        let newY = player.y + dy * factor;
+
+        newX = Math.max(player.w/2, Math.min(worldW - player.w/2, newX));
+        newY = Math.max(player.h/2, Math.min(worldH - player.h/2, newY));
+
+        player.x = newX;
+        player.y = newY;
+    }
+
+    // 視角跟隨 (略)
+    const viewW = canvas.width / devicePixelRatio;
+    const viewH = canvas.height / devicePixelRatio;
+    view.x = player.x - viewW / 2 / view.scale;
+    view.y = player.y - viewH / 2 / view.scale;
+
+    view.x = Math.max(0, Math.min(worldW - viewW/view.scale, view.x));
+    view.y = Math.max(0, Math.min(worldH - viewH/view.scale, view.y));
+}
+
+function draw() {
+    ctx.save();
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    ctx.clearRect(0, 0, stage.clientWidth, stage.clientHeight);
+
+    ctx.translate(-view.x * view.scale, -view.y * view.scale);
+    ctx.scale(view.scale, view.scale);
+    
+    // 繪製地圖/背景
+    ctx.fillStyle = '#0a223a';
+    ctx.fillRect(0, 0, worldW, worldH);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(0, 0, worldW, worldH);
+
+    let nearestBooth = null;
+    let minDistance = Infinity;
+
+    // 繪製展台
+    for (const b of booths) {
+        const img = images[`booth${b.id}`] || images['boothPlaceholder'];
+        const centerX = b.x + b.w / 2;
+        const centerY = b.y + b.h / 2;
+        const playerCenterX = player.x;
+        const playerCenterY = player.y;
+
+        const distance = Math.hypot(centerX - playerCenterX, centerY - playerCenterY);
+        if (distance < minDistance) {
+            minDistance = distance;
+            nearestBooth = b;
+        }
+
+        ctx.drawImage(img, b.x, b.y, b.w, b.h);
+
+        // 繪製展台名稱，使用換行邏輯
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.font = 'bold 20px "Noto Sans TC"';
+        ctx.textAlign = 'center';
+
+        const MAX_TITLE_WIDTH = b.w + 40; 
+        const LINE_HEIGHT = 22; 
+
+        const lines = wrapText(ctx, b.title, MAX_TITLE_WIDTH);
+        
+        // 【修正點 1】：將標題繪製的 Y 座標更向上調整 (從 -10 調整到 -40)
+        let lineY = b.y - 40 - (lines.length - 1) * LINE_HEIGHT / 2; 
+
+        lines.forEach((line, index) => {
+            ctx.fillText(line, b.x + b.w / 2, lineY + index * LINE_HEIGHT);
+        });
+    }
+    
+    // 繪製最近的互動提示
+    if(nearestBooth && minDistance < 120 && gameActive){
+        ctx.fillStyle = varColor('--primary');
+        ctx.font = 'bold 24px "Noto Sans TC"';
+        ctx.textAlign = 'center';
+        ctx.fillText('[E] / 互動按鈕', nearestBooth.x + nearestBooth.w / 2, nearestBooth.y + nearestBooth.h + 30);
+    }
+
+    // 繪製玩家角色
+    const playerChar = images[player.spriteId];
+    if (playerChar) {
+        if (playerChar.isEmoji) {
+            // 繪製 Emoji 角色
+            ctx.font = '40px sans-serif'; 
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(playerChar.emoji, player.x, player.y); 
+
+        } else {
+            // 繪製圖片角色 (舊邏輯)
+            ctx.drawImage(playerChar, player.x - player.w / 2, player.y - player.h / 2, player.w, player.h);
+        }
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '16px "Noto Sans TC"';
+        ctx.fillText(player.name, player.x, player.y - player.h/2 - 10);
+    } else {
+        ctx.fillStyle = 'red';
+        ctx.fillRect(player.x - player.w / 2, player.y - player.h / 2, player.w, player.h);
+    }
+
+    ctx.restore();
+}
+
+function loop(currentTime) {
+    if (!lastTime) lastTime = currentTime;
+    const dt = (currentTime - lastTime) / 1000;
+    lastTime = currentTime;
+
+    if (imagesLoaded === totalImages) {
+        update(dt);
+        draw();
+    }
+    
+    requestAnimationFrame(loop);
+}
+
+// 模態視窗：開啟展台 (略)
+function openBooth(booth) {
+    if (boothModal.classList.contains('open')) return;
+    
+    document.getElementById('boothTitle').textContent = booth.title;
+    document.getElementById('boothDesc').textContent = booth.desc;
+    
+    const img = images[`booth${booth.id}`];
+    // 檢查 img 是否為有效的圖片物件
+    const imgPath = img && !img.isEmoji ? img.src : 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="250"><rect width="100%" height="100%" fill="#1a3d5f"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-size="20" fill="#e6eef8">展台圖片載入失敗或不存在</text></svg>';
+    
+    boothImg.src = imgPath;
+    boothImg.dataset.originalSrc = imgPath; 
+    
+    openModal(boothModal);
+}
+
+// 修復 tryInteract 邏輯 - 偵測靠近 (略)
+function tryInteract(){
+    if (boothModal.classList.contains('open')) return;
+
+    for(const b of booths){
+        const dx = (player.x) - (b.x + b.w / 2);
+        const dy = (player.y) - (b.y + b.h / 2);
+        if(Math.hypot(dx, dy) < 120){
+            openBooth(b);
+            break;
+        }
+    }
+}
+
+// 取得 CSS 變數顏色 (用於 Canvas 繪圖) (略)
+function varColor(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+// 1. 載入圖片資源
+Promise.all([
+    ...CHAR_PRESETS.map(c => loadImage(c.id, c.path)), 
+    ...booths.map(b => loadImage(`booth${b.id}`, b.img)),
+    loadImage('boothPlaceholder', `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='120'><rect width='100%' height='100%' fill='%232c3e50'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='18' fill='%23ecf0f1'>展台</text></svg>`)
+]).then(() => {
+    // 2. 圖片全部載入完成後，初始化並啟動遊戲循環
+    // 重新計算 totalImages (因為角色不算圖片了)
+    totalImages = Object.keys(images).filter(k => !images[k].isEmoji).length;
+    imagesLoaded = totalImages; 
+    
+    hud.textContent = '載入完成，請選擇角色開始體驗';
+    updateCharPreview(selectedCharId);
+    requestAnimationFrame(loop);
+});
+
+
+// ----------------- 原有控制邏輯 (保持不變) -----------------
+const keys={};
+window.addEventListener('keydown',e=>{
+    keys[e.key.toLowerCase()]=true;
+    if((e.key==='e'||e.key==='E') && gameActive && !boothModal.classList.contains('open')) {
+        tryInteract();
+    }
+});
+window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false;});
+
+// pointer drag to pan (略)
+let dragging=false,lastMouse=null;
+stage.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse' && gameActive){dragging=true;canvas.style.cursor='grabbing';lastMouse={x:e.clientX,y:e.clientY};}});
+window.addEventListener('pointerup',()=>{dragging=false;canvas.style.cursor='grab';lastMouse=null;});
+window.addEventListener('pointermove',e=>{if(dragging&&lastMouse){const dx=(e.clientX-lastMouse.x)/view.scale;const dy=(e.clientY-lastMouse.y)/view.scale;view.x-=dx;view.y-=dy;lastMouse={x:e.clientX,y:e.clientY};}});
+canvas.style.cursor='grab'; 
+
+// wheel zoom (略)
+stage.addEventListener('wheel',e=>{
+    if(!gameActive) return;
+    e.preventDefault();
+    const d=Math.sign(e.deltaY)*-0.08;
+    view.scale=Math.max(0.6,Math.min(1.6,view.scale+d));
+},{passive:false});
+
+// click to interact (略)
+canvas.addEventListener('click',e=>{
+    if(!gameActive || boothModal.classList.contains('open')) return;
+    const rect=canvas.getBoundingClientRect();
+    const cx=(e.clientX-rect.left)/rect.width*canvas.width;
+    const cy=(e.clientY-rect.top)/rect.height*canvas.height;
+    const wx=(cx/devicePixelRatio)/view.scale+view.x;
+    const wy=(cy/devicePixelRatio)/view.scale+view.y;
+    for(const b of booths){
+        if(wx>=b.x && wx<=b.x+b.w && wy>=b.y && wy<=b.y+b.h){
+            openBooth(b);
+            break;
+        }
+    }
+});
+
+// Mobile joystick & Interact Button (略)
+const joyWrap = document.getElementById('joyWrap');
+const stick = document.getElementById('stick');
+const touchInteract = document.getElementById('touchInteract');
+let joyActive = false;
+let joyId = null;
+let joyOrigin = null;
+let joyVec = { x: 0, y: 0 };
+const maxOffset = 48;
+
+function startJoy(e) {
+  if (!gameActive || boothModal.classList.contains('open')) return;
+  joyActive = true;
+  joyId = e.pointerId;
+  const rect = joyWrap.getBoundingClientRect();
+  joyOrigin = { x: e.clientX, y: e.clientY };
+  const relativeX = e.clientX - rect.left;
+  const relativeY = e.clientY - rect.top;
+  stick.style.left = `${relativeX}px`;
+  stick.style.top = `${relativeY}px`;
+  stick.style.transform = 'translate(-50%, -50%)';
+  e.preventDefault(); 
+}
+
+function moveJoy(e) {
+  if (!joyActive || e.pointerId !== joyId) return;
+  const dx = e.clientX - joyOrigin.x;
+  const dy = e.clientY - joyOrigin.y;
+  
+  const len = Math.hypot(dx, dy);
+  const factor = Math.min(len, maxOffset) / len;
+
+  const nx = dx * factor;
+  const ny = dy * factor;
+  
+  joyVec.x = nx / maxOffset;
+  joyVec.y = ny / maxOffset;
+
+  stick.style.transform = `translate(${nx - 35}px, ${ny - 35}px)`; 
+}
+
+function endJoy(e) {
+  if (e.pointerId !== joyId) return;
+  joyActive = false;
+  joyId = null;
+  joyOrigin = null;
+  joyVec = { x: 0, y: 0 };
+  
+  stick.style.left = '50%';
+  stick.style.top = '50%';
+  stick.style.transform = 'translate(-50%, -50%)';
+}
+
+joyWrap.addEventListener('pointerdown', startJoy);
+window.addEventListener('pointermove', moveJoy); 
+window.addEventListener('pointerup', endJoy);
+window.addEventListener('pointercancel', endJoy);
+
+touchInteract.addEventListener('click', () => {
+  if (!gameActive || boothModal.classList.contains('open')) return;
+  tryInteract();
+});
+
+document.getElementById('boothCount').textContent = NUM_BOOTHS;
+
+</script>
+</body>
+</html>
